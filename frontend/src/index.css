@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ */
+/* Base                                                                */
+/* ------------------------------------------------------------------ */
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-800;
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial,
+      sans-serif;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply text-slate-900;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reusable component classes (Tailwind only, no extra dependencies)   */
+/* ------------------------------------------------------------------ */
+@layer components {
+  /* White surface used for panels, cards and chat bubbles. */
+  .card {
+    @apply rounded-2xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60;
+  }
+
+  /* Small uppercase section label. */
+  .section-label {
+    @apply text-xs font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  /* Text input / textarea shared style. */
+  .field {
+    @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  /* Pill used for statuses, badges and chips. */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium;
+  }
+}

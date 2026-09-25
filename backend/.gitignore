@@ -1,0 +1,22 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Django
+*.sqlite3
+media/
+staticfiles/
+db.sqlite3
+
+# Logs / coverage
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
