@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # Nexus — AI Academic Document Assistant
 
 Nexus helps university students work with their academic documents. Upload
@@ -148,4 +148,3 @@ intentionally not implemented yet.
 =======
 # Nexus-AI-Academic-Document-Assistant
 Nexus helps university students compare their research documents with university-specific requirements and identify missing or unclear sections, while providing source-grounded recommendations.
->>>>>>> e66989ac60b688c0883807a9d12a82073654177b
