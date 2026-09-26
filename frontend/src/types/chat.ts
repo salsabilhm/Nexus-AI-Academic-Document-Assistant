@@ -18,8 +18,24 @@ export interface Message {
   createdAt: string;
 }
 
-/** Payload sent to the future chat endpoint. */
+/** Payload sent to POST /api/chat/. */
 export interface SendMessagePayload {
-  conversationId?: string;
+  /** chat_sessions id to continue; omit to start a new session. */
+  sessionId?: string;
   content: string;
+}
+
+/** One message as returned by the API (Django/DRF snake_case). */
+export interface ApiChatMessage {
+  id: string;
+  role: ChatRole;
+  content: string;
+  created_at: string;
+}
+
+/** Response body of POST /api/chat/. */
+export interface SendChatResponse {
+  session_id: string;
+  session_title: string;
+  messages: ApiChatMessage[];
 }

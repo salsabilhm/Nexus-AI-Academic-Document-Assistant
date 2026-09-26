@@ -6,12 +6,20 @@ import { CHAT_DEMO_MODE, createDemoReply } from '../data/demo';
 
 // Local state for a chat conversation.
 //
+// The session id lives in the page (Chatbot) because the document sidebar
+// needs it too: uploads and questions must land in the same chat_sessions row.
+//
 // Two paths:
-// - CHAT_DEMO_MODE (current): appends a placeholder reply after a short delay
-//   so the loading and citation states can be reviewed without a backend.
-// - otherwise: calls chatbotApi.sendMessage() — the real endpoint, which does
-//   not exist yet, and surfaces its error honestly.
-export function useChat() {
+// - CHAT_DEMO_MODE (off): appends a placeholder reply after a short delay so
+//   the loading and citation states can be reviewed without a backend.
+// - otherwise (current): POSTs the question to /api/chat/ and appends the
+//   assistant reply the backend saved. The session id returned by the API is
+//   handed back through `onSessionId` so every follow-up question lands in the
+//   same chat_sessions row.
+export function useChat(
+  sessionId: string | null,
+  onSessionId: (id: string) => void,
+) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,19 +49,38 @@ export function useChat() {
           return;
         }
 
-        const reply = await sendMessage({ content: trimmed });
-        setMessages((previous) => [...previous, reply]);
+        const result = await sendMessage({
+          content: trimmed,
+          sessionId: sessionId ?? undefined,
+        });
+        // Remember the session so the next question groups with this one.
+        onSessionId(result.sessionId);
+        setMessages((previous) => [...previous, result.message]);
       } catch (err) {
-        // The chat endpoint does not exist yet: surface the real reason.
+        // Surface the real reason the API rejected or failed the request.
         setError(toApiError(err).message);
       } finally {
         setIsSending(false);
       }
     },
-    [isSending],
+    [isSending, sessionId, onSessionId],
   );
 
   const clearError = useCallback(() => setError(null), []);
 
-  return { messages, isSending, error, sendMessage: sendMessageToBot, clearError };
+  /** Drop the conversation shown on screen ("New session"). */
+  const resetChat = useCallback(() => {
+    setMessages([]);
+    setError(null);
+    setIsSending(false);
+  }, []);
+
+  return {
+    messages,
+    isSending,
+    error,
+    sendMessage: sendMessageToBot,
+    clearError,
+    resetChat,
+  };
 }

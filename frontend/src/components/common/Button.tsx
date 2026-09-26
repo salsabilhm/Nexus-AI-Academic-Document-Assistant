@@ -12,23 +12,18 @@ type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   children: ReactNode;
 };
 
-const baseClasses =
-  'inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:cursor-not-allowed disabled:opacity-50';
-
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-indigo-600 text-white shadow-sm hover:bg-indigo-700',
-  secondary: 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
-  ghost: 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+  primary: 'nx-btn-primary',
+  secondary: 'nx-btn-secondary',
+  ghost: 'nx-btn-ghost',
 };
 
-const sizeClasses: Record<ButtonSize, string> = {
-  sm: 'px-3 py-1.5 text-xs',
-  md: 'px-4 py-2 text-sm',
+const sizeOverrides: Record<ButtonSize, string> = {
+  sm: 'px-4 py-2 text-xs',
+  md: '',           // default size already baked into nx-btn-* classes
   lg: 'px-6 py-3 text-base',
 };
 
-// Single button component used across the app. Pass `to` to navigate instead
-// of handling a click — keeps pages free of duplicated link styling.
 export default function Button({
   variant = 'primary',
   size = 'md',
@@ -38,7 +33,13 @@ export default function Button({
   type = 'button',
   ...rest
 }: ButtonProps) {
-  const classes = `${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`;
+  const classes = [
+    variantClasses[variant],
+    sizeOverrides[size],
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   if (to !== undefined) {
     const linkProps = rest as AnchorHTMLAttributes<HTMLAnchorElement>;

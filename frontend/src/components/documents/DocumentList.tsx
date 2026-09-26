@@ -5,14 +5,19 @@ interface DocumentListProps {
   documents: DocumentItem[];
 }
 
-// Renders the document collection with a clear empty state.
+// Renders the documents of the chat session that is currently open — the
+// caller never passes files from another session, so an empty list simply
+// means "nothing uploaded here yet".
 export default function DocumentList({ documents }: DocumentListProps) {
   if (documents.length === 0) {
     return (
-      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center">
-        <p className="text-sm font-medium text-slate-600">No documents yet</p>
-        <p className="mt-1 text-xs text-slate-500">
-          Upload your first university document to get started.
+      <div
+        className="rounded-xl border border-dashed px-4 py-6 text-center"
+        style={{ borderColor: 'rgba(192,132,252,0.15)', background: 'rgba(255,255,255,0.02)' }}
+      >
+        <p className="text-xs font-medium" style={{ color: '#a78bca' }}>No documents in this session</p>
+        <p className="mt-1 text-[11px]" style={{ color: '#6b3fa0' }}>
+          Upload your papers, rubrics, or requirements to get started.
         </p>
       </div>
     );

@@ -4,21 +4,25 @@ import type { DocumentItem } from '../types/document';
 // ---------------------------------------------------------------------------
 // Local mock data used ONLY to demonstrate the UI.
 //
-// There is no backend chat/document endpoint yet, so without these values the
-// interface could not show what a conversation, a document list or a citation
-// block looks like. Nothing here is produced by a model or a server.
+// createDemoReply() exists for reviewing the citation block offline. The
+// document list below is not rendered anywhere: "My Documents" reads the
+// documents of the current chat session from GET /api/documents/ instead, so
+// the sidebar is never seeded with sample data.
+// Nothing here is produced by a model or a server.
 //
-// Set CHAT_DEMO_MODE to false as soon as POST /api/chat/ exists: useChat will
-// then call chatbotApi.sendMessage() instead of these placeholders.
+// CHAT_DEMO_MODE is false: POST /api/chat/ exists, so useChat calls
+// chatbotApi.sendMessage() and renders the reply the backend stored. Flip it
+// back to true only to review the chat UI without a backend running.
 // ---------------------------------------------------------------------------
-export const CHAT_DEMO_MODE: boolean = true;
+export const CHAT_DEMO_MODE: boolean = false;
 
-/** Placeholder document list until GET /api/documents/ is implemented. */
+/** Sample documents kept only for offline UI previews (never shown in the app). */
 export const DEMO_DOCUMENTS: DocumentItem[] = [
   {
     id: 'doc-1',
     name: 'Thesis Requirements 2026.pdf',
     type: 'requirement',
+    source: 'university',
     status: 'ready',
     createdAt: '2026-09-18T09:00:00.000Z',
   },
@@ -26,6 +30,7 @@ export const DEMO_DOCUMENTS: DocumentItem[] = [
     id: 'doc-2',
     name: 'Faculty Writing Guidelines.pdf',
     type: 'guideline',
+    source: 'university',
     status: 'ready',
     createdAt: '2026-09-19T14:30:00.000Z',
   },
@@ -33,6 +38,7 @@ export const DEMO_DOCUMENTS: DocumentItem[] = [
     id: 'doc-3',
     name: 'Research Draft v3.docx',
     type: 'research',
+    source: 'student',
     status: 'processing',
     createdAt: '2026-09-22T11:15:00.000Z',
   },
@@ -46,9 +52,9 @@ export const DEMO_SUGGESTIONS: string[] = [
 ];
 
 /**
- * Placeholder assistant reply (local data, not a model output) shown while
- * CHAT_DEMO_MODE is true. The sources mirror DEMO_DOCUMENTS so the citation UI
- * can be reviewed with realistic values.
+ * Placeholder assistant reply (local data, not a model output) shown only
+ * while CHAT_DEMO_MODE is true. The sources mirror DEMO_DOCUMENTS so the
+ * citation UI can be reviewed with realistic values.
  */
 export function createDemoReply(): Message {
   return {

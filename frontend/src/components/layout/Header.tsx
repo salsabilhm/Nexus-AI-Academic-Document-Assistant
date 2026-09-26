@@ -1,39 +1,49 @@
 import { Link, NavLink } from 'react-router-dom';
-import Button from '../common/Button';
+import NexusLogo from '../common/NexusLogo';
 
-const navItems = [
-  { to: '/', label: 'Home' },
-  { to: '/chatbot', label: 'Chatbot' },
-];
-
-// Top bar: brand, primary navigation and the main call to action.
+// Top navigation bar — dark glass with Nexus brand.
 export default function Header() {
   return (
-    <header className="sticky top-0 z-20 flex h-16 shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/90 px-4 backdrop-blur md:px-6">
-      <Link to="/" className="flex items-center gap-3">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-sm font-bold text-white shadow-sm">
-          N
-        </span>
+    <header
+      className="sticky top-0 z-30 flex h-16 shrink-0 items-center justify-between gap-4 px-5 md:px-8"
+      style={{
+        background: 'rgba(13, 0, 20, 0.85)',
+        backdropFilter: 'blur(16px)',
+        borderBottom: '1px solid rgba(192, 132, 252, 0.12)',
+      }}
+    >
+      {/* Brand */}
+      <Link to="/" className="flex items-center gap-2.5 group">
+        <NexusLogo size={34} />
         <span className="flex flex-col leading-tight">
-          <span className="text-base font-semibold tracking-tight text-slate-900">Nexus</span>
-          <span className="hidden text-[11px] text-slate-500 sm:block">
-            AI Academic Document Assistant
+          <span
+            className="text-sm font-semibold tracking-wide transition-colors group-hover:text-purple-300"
+            style={{ color: '#f0e4ff' }}
+          >
+            Nexus
+          </span>
+          <span className="hidden text-[10px] sm:block" style={{ color: '#6b3fa0' }}>
+            AI Academic Assistant
           </span>
         </span>
       </Link>
 
-      <div className="flex items-center gap-1 sm:gap-2">
-        <nav className="mr-1 hidden items-center gap-1 sm:flex">
-          {navItems.map((item) => (
+      {/* Right side */}
+      <div className="flex items-center gap-2">
+        <nav className="mr-2 hidden items-center gap-1 sm:flex" aria-label="Main navigation">
+          {[
+            { to: '/', label: 'Home' },
+            { to: '/chatbot', label: 'Chatbot' },
+          ].map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === '/'}
               className={({ isActive }) =>
-                `rounded-lg px-3 py-2 text-sm transition-colors ${
+                `rounded-full px-4 py-1.5 text-sm font-medium transition-all ${
                   isActive
-                    ? 'bg-slate-100 font-medium text-slate-900'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                    ? 'text-purple-200'
+                    : 'text-purple-300/60 hover:text-purple-200'
                 }`
               }
             >
@@ -42,9 +52,12 @@ export default function Header() {
           ))}
         </nav>
 
-        <Button to="/chatbot" size="sm">
-          Open Chatbot
-        </Button>
+        <Link
+          to="/chatbot"
+          className="nx-btn-primary px-4 py-2 text-sm font-semibold"
+        >
+          Open Nexus
+        </Link>
       </div>
     </header>
   );
