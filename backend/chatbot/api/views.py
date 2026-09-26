@@ -15,10 +15,13 @@ POST /api/chat/                    — save a question + a temporary answer
                                      in chat_messages (grouped by
                                      chat_sessions)
 
-No preprocessing, retrieval or LLM logic belongs here.
+The upload view only *triggers* preprocessing + RAG indexing (orchestrated
+by services/document_service.py); retrieval and the LLM are still not
+called anywhere, and no such logic lives in this module.
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from django.db import connection, transaction, OperationalError
@@ -36,7 +39,10 @@ from chatbot.api.serializers import (
     DocumentUploadSerializer,
 )
 from chatbot.models import ChatMessage, ChatSession, Document
+from chatbot.services.document_service import DocumentService
 from chatbot.services.storage import StorageError, StorageService
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -91,9 +97,13 @@ class DocumentUploadView(APIView):
     2. Read file bytes into memory.
     3. Upload the original file to Supabase Storage → storage path.
     4. Create a Document record in PostgreSQL, linked to that session.
-    5. Return the serialized document (including its ``session_id``).
+    5. Preprocess + index: DocumentProcessor -> RAGService.index()
+       (orchestrated synchronously by services/document_service.py; the
+       document ends as status "ready", or "failed" when the file cannot
+       be processed — which never breaks the upload itself).
+    6. Return the serialized document (including its ``session_id`` and
+       the final ``status``).
 
-    The file is stored as-is: no preprocessing happens in this step.
     Starting a new session never removes anything here — documents only ever
     change session when the client explicitly sends a different ``session_id``.
 
@@ -199,7 +209,22 @@ class DocumentUploadView(APIView):
             )
 
         # ------------------------------------------------------------------ #
-        # 5. Return the created document                                       #
+        # 5. Preprocess + index: DocumentProcessor -> RAGService.index()       #
+        # ------------------------------------------------------------------ #
+        # The orchestration lives in services/document_service.py; this view
+        # only triggers it. A file that cannot be processed (.doc legacy
+        # binary, PDF without extractable text, ...) is still stored and
+        # returned — with status "failed" — so one bad file never breaks the
+        # upload contract (201) or the "My Documents" sidebar.
+        try:
+            DocumentService().process_document(document, file_bytes)
+        except Exception:
+            logger.exception(
+                "Preprocessing/indexing failed for document %s", document.id
+            )
+
+        # ------------------------------------------------------------------ #
+        # 6. Return the created document                                       #
         # ------------------------------------------------------------------ #
         response_serializer = DocumentSerializer(document)
         return Response(response_serializer.data, status=status.HTTP_201_CREATED)

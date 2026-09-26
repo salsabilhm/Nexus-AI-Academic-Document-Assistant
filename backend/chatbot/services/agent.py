@@ -10,24 +10,24 @@ Future behaviour (not implemented yet):
 
 TODO:
 - define the supported operations and their preconditions;
-- implement a small decision loop that calls DocumentProcessor, RagService and
-  the LLM layer through well-defined interfaces;
-- always return the sources used for an answer so the API can show them;
+- implement a small decision loop that calls DocumentProcessor, RAGService
+  (chatbot/rag/) and the LLM layer through well-defined interfaces;
+- always return the chunks used for an answer so the API can show them;
 - keep LLM credentials inside the LLM layer, never here or in the frontend.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .rag import RetrievedPassage
+from chatbot.rag.service import RetrievedChunk
 
 
 @dataclass
 class AgentResult:
-    """Outcome of a workflow run: the answer and the passages that support it."""
+    """Outcome of a workflow run: the answer and the chunks that support it."""
 
     answer: str
-    passages: list[RetrievedPassage] = field(default_factory=list)
+    chunks: list[RetrievedChunk] = field(default_factory=list)
     operation: str = ""
 
 

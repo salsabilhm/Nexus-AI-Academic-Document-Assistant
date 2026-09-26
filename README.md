@@ -55,7 +55,8 @@ nexus/
 ├── backend/      Django REST API (config/ + chatbot/ app)
 │   └── chatbot/
 │       ├── api/        serializers, views, urls
-│       └── services/   document_processor, rag, agent (skeletons)
+│       ├── rag/        embedder, vector_store, RAG service (index/retrieve)
+│       └── services/   document_processor, document_service, agent, storage
 ├── dataset/      university and student documents (added later)
 ├── docs/         architecture, api, database notes
 └── docker-compose.yml
@@ -94,7 +95,7 @@ python manage.py runserver  # http://localhost:8000
 Check the connection: `GET http://localhost:8000/api/health/` →
 
 ```json
-{ "status": "ok", "service": "nexus-backend" }
+{ "status": "ok", "service": "nexus-backend", "database": "ok" }
 ```
 
 ## Environment variables
@@ -142,9 +143,8 @@ commits — the root `.gitignore` already covers them.
 4. **Comparison** — check a student document against university requirements.
 5. **Feedback** — missing/unclear sections with cited sources.
 
-Current status: project skeleton only. Routing, health endpoint and the
-service layer structure are in place; RAG, the agent and LLM integration are
-intentionally not implemented yet.
-=======
-# Nexus-AI-Academic-Document-Assistant
-Nexus helps university students compare their research documents with university-specific requirements and identify missing or unclear sections, while providing source-grounded recommendations.
+Current status: upload (4 types, session-scoped), preprocessing
+(`DocumentProcessor`) and the RAG layer (`chatbot/rag/` — deterministic local
+embedder, pgvector store, `index()`/`retrieve()` wired after each upload) are
+implemented and tested. The agent workflow and the LLM integration are the
+next step.

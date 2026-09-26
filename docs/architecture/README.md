@@ -32,8 +32,14 @@ LLM
 1. Secrets (LLM keys, DB credentials) live in backend environment variables only.
 2. The frontend only ever talks to the Django API.
 3. Every assistant answer returns the sources that supported it.
-4. Services are independent modules under `chatbot/services/` — each one can be
-   replaced without touching the others.
+4. Services are independent modules under `chatbot/services/` (processing,
+   orchestration, storage, agent) and `chatbot/rag/` (embedder, vector store,
+   RAG service) — each one can be replaced without touching the others.
 
-Current state: only the API layer and `GET /api/health/` exist. The service
-modules are skeletons with TODOs; no RAG, agent, vector store or LLM is wired.
+## Current state
+
+- **Wired:** frontend → Django API → `DocumentProcessor` → `RAGService`
+  (`index()` after every upload, `retrieve()` available to the Agent next),
+  vector storage in PostgreSQL via pgvector.
+- **Not wired yet:** the Agent decision loop and the LLM — answers are still
+  a placeholder that says so.

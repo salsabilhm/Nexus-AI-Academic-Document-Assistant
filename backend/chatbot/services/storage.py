@@ -69,6 +69,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from typing import TYPE_CHECKING
@@ -161,7 +162,7 @@ class StorageService:
         # Bucket is added by the URL below — do not repeat it in the key.
         object_path = f"{source}/{unique_prefix}-{safe_name}"
 
-        upload_url = f"{self._url}/storage/v1/object/{self._bucket}/{object_path}"
+        upload_url = _object_url(self._url, self._bucket, object_path)
 
         req = urllib.request.Request(
             url=upload_url,
@@ -202,7 +203,7 @@ class StorageService:
         Silently ignores 404s (object already gone). Raises StorageError on
         other failures.
         """
-        delete_url = f"{self._url}/storage/v1/object/{self._bucket}/{object_path}"
+        delete_url = _object_url(self._url, self._bucket, object_path)
 
         req = urllib.request.Request(
             url=delete_url,
@@ -280,17 +281,40 @@ def _guess_content_type(name: str) -> str:
     return guessed or "application/octet-stream"
 
 
-def _safe_filename(name: str) -> str:
-    """Return a URL-safe version of a filename.
+def _object_url(base_url: str, bucket: str, object_path: str) -> str:
+    """Build the Storage REST URL for one object key.
 
-    Replaces whitespace and most special characters with underscores while
-    keeping the extension, dots (for the extension separator), hyphens, and
-    alphanumerics intact.
+    The key is percent-encoded so the request URL stays pure ASCII: ``urllib``
+    refuses to emit any other encoding — without this, a stray non-ASCII
+    character dies with ``UnicodeEncodeError: 'ascii' codec can't encode
+    character`` in ``http.client`` before reaching Supabase. Supabase decodes
+    the path, so the stored object key never changes; ASCII keys are sent
+    byte-for-byte as before.
+    """
+    quoted_path = urllib.parse.quote(object_path, safe="/")
+    return f"{base_url}/storage/v1/object/{bucket}/{quoted_path}"
+
+
+def _safe_filename(name: str) -> str:
+    """Return an ASCII-safe version of a filename.
+
+    Supabase Storage rejects non-ASCII object keys with
+    ``HTTP 400 Invalid key: ...`` — even when the request URL is correctly
+    percent-encoded — so accents are transliterated first
+    (``Mémoire.pdf`` -> ``Memoire.pdf``), then whitespace and most special
+    characters become underscores while the extension, dots, hyphens and
+    alphanumerics are kept. Only the *storage key* is ASCII: the original
+    name is what ``Document.file_name`` stores and the UI displays.
     """
     import re
+    import unicodedata
 
+    # NFKD decomposition + drop combining marks: é -> e, ç -> c, ỡ -> o, ...
+    ascii_name = (
+        unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    )
     # Keep only safe characters.
-    safe = re.sub(r"[^\w.\-]", "_", name)
+    safe = re.sub(r"[^\w.\-]", "_", ascii_name)
     # Collapse consecutive underscores.
     safe = re.sub(r"_+", "_", safe)
     return safe.strip("_") or "document.pdf"
