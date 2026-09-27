@@ -1,4 +1,4 @@
-```python
+
 """Django settings for the Nexus backend.
 
 Environment-driven configuration:
@@ -366,4 +366,4 @@ EMBEDDING_API_KEY: str = os.environ.get(
     "EMBEDDING_API_KEY",
     "",
 )
-```
+
