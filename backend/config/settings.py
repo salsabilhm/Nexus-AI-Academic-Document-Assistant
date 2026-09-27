@@ -40,7 +40,12 @@ if not SECRET_KEY:
     else:
         raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG is False.")
 
+# إعداد المضيفين المسموح بهم مع دعم تلقائي لـ Render
 ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+
+RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+if RENDER_EXTERNAL_HOSTNAME:
+    ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 
 # --- Database ---------------------------------------------------------------
@@ -183,23 +188,15 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 # --- CORS -------------------------------------------------------------------
-# Only local origins on the React dev server may call the API.
-# Vite silently moves to the next free port (5174, ...) when 5173 is already
-# taken, so every local dev origin must be listed here: an origin that is not
-# listed gets no Access-Control-Allow-Origin header and the browser reports a
-# "Network Error" even though Django answered the request successfully.
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:5173,http://localhost:5174,"
     "http://127.0.0.1:5173,http://127.0.0.1:5174",
 )
-# Future: allow credentials/extra headers explicitly if the API needs them.
 
 
 # --- Django REST Framework --------------------------------------------------
 REST_FRAMEWORK = {
-    # Authentication and permissions will be added together with the first
-    # protected endpoints; for now the API is read-only and open in DEBUG.
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
     ],
@@ -219,8 +216,6 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 # --- Supabase Storage -------------------------------------------------------
-# Used by chatbot/services/storage.py to upload PDF files.
-# All three values must be set when DEBUG is False.
 SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_STORAGE_BUCKET: str = os.environ.get("SUPABASE_STORAGE_BUCKET", "documents")
@@ -233,7 +228,6 @@ if not DEBUG:
 
 
 # --- Future AI services (placeholders) -------------------------------------
-# These are not used yet; they will be wired up in later phases.
 LLM_API_KEY: str = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL: str = os.environ.get("LLM_MODEL", "")
 EMBEDDING_API_KEY: str = os.environ.get("EMBEDDING_API_KEY", "")
