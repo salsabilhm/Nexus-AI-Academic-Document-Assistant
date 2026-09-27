@@ -168,7 +168,7 @@ class DocumentSessionQuerySerializer(serializers.Serializer):
 # ---------------------------------------------------------------------------
 
 class ChatRequestSerializer(serializers.Serializer):
-    """Validates POST /api/chat/ — the temporary "Ask Question" endpoint.
+    """Validates POST /api/chat/ — the Nexus "Ask Question" endpoint.
 
     Fields
     ------

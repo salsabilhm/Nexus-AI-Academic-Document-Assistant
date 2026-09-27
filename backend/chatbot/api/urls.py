@@ -9,7 +9,7 @@ GET  health/                — liveness + DB check
 GET  documents/             — documents of one session (?session_id=<uuid>)
 POST documents/upload/      — upload a file (multipart/form-data: file + source
                               + session_id)
-POST chat/                  — save a question + a temporary answer
+POST chat/                  — ask the agent (history + RAG + Gemini answer)
 """
 from django.urls import path
 

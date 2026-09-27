@@ -89,6 +89,15 @@ class DocumentService:
                 chunk.metadata["session_id"] = (
                     str(document.session_id) if document.session_id else None
                 )
+                # The processor only ever sees the temporary path this service
+                # created (nexus_doc_*.pdf / nexus_doc_*.zip). Replace it with
+                # the real uploaded name so retrieval context and the LLM cite
+                # "MemoireL3SCI.pdf", not an internal temp file. Zip members
+                # keep their real relative path in `source_file`.
+                if chunk.metadata.get("source_archive"):
+                    chunk.metadata["source_archive"] = document.file_name
+                elif "source_file" in chunk.metadata:
+                    chunk.metadata["source_file"] = document.file_name
 
             # 2. Persist the text and index it — one transaction, so the
             #    chunk rows and the vectors always agree.

@@ -11,13 +11,13 @@ POST /api/documents/upload/        — upload a file (.pdf/.doc/.docx/.zip) to
                                      Supabase Storage and record metadata
                                      in PostgreSQL, associated with the
                                      session it was uploaded in
-POST /api/chat/                    — save a question + a temporary answer
-                                     in chat_messages (grouped by
-                                     chat_sessions)
+POST /api/chat/                    — ask a question: the agent loads the
+                                      conversation history, searches the
+                                      documents (RAG) and answers with Gemini
 
 The upload view only *triggers* preprocessing + RAG indexing (orchestrated
-by services/document_service.py); retrieval and the LLM are still not
-called anywhere, and no such logic lives in this module.
+by services/document_service.py); the chat view only calls
+services.agent.ask_nexus — retrieval and the LLM live in services/agent/.
 """
 from __future__ import annotations
 
@@ -39,6 +39,12 @@ from chatbot.api.serializers import (
     DocumentUploadSerializer,
 )
 from chatbot.models import ChatMessage, ChatSession, Document
+from chatbot.rag.service import RetrievedChunk
+from chatbot.services.agent import (
+    LLMConfigError,
+    ask_nexus,
+    ensure_llm_configured,
+)
 from chatbot.services.document_service import DocumentService
 from chatbot.services.storage import StorageError, StorageService
 
@@ -267,11 +273,19 @@ class DocumentListView(APIView):
 
 
 # ---------------------------------------------------------------------------
-# Ask question (temporary answer — no retrieval or LLM in this step)
+# Ask question (Nexus agent: history -> search_documents -> RAG -> Gemini)
 # ---------------------------------------------------------------------------
 
 class ChatView(APIView):
-    """POST /api/chat/ — the temporary "Ask Question" endpoint.
+    """POST /api/chat/ — ask the Nexus agent about the session's documents.
+
+    Flow (all orchestration lives in services/agent/; this view only calls it)::
+
+        validate input -> resolve session -> check LLM configuration
+            -> save the user message
+            -> ask_nexus(question, session_id)  # history -> tool -> RAG -> Gemini
+            -> save the assistant message
+            -> return both messages + answer + grounded sources
 
     Persists both turns of the exchange, grouped by session::
 
@@ -286,13 +300,17 @@ class ChatView(APIView):
         {
           "session_id": "<uuid>",
           "session_title": "...",
+          "answer": "...",
+          "sources": [ {document_id, document_type, document_name,
+                        page, section, score, excerpt}, ... ],
           "messages": [ {user message}, {assistant message} ]
         }
 
-    The assistant reply is a fixed placeholder produced by
-    ``_temporary_reply()``: document processing, retrieval, embeddings and
-    the LLM are intentionally not connected yet. The real pipeline replaces
-    that helper later without changing this contract.
+    ``messages`` keeps the contract the frontend already consumes; ``answer``
+    and ``sources`` are additive. Sources are only chunks the agent actually
+    retrieved (RAG evidence) — never fabricated. When GEMINI_API_KEY is
+    missing, the request fails explicitly with 503 instead of pretending the
+    model answered.
     """
 
     authentication_classes: list = []
@@ -300,7 +318,7 @@ class ChatView(APIView):
 
     def post(self, request) -> Response:
         # ------------------------------------------------------------------ #
-        # 1. Validate input                                                    #
+        # 1. Validate input                                                  #
         # ------------------------------------------------------------------ #
         serializer = ChatRequestSerializer(data=request.data)
         if not serializer.is_valid():
@@ -310,7 +328,7 @@ class ChatView(APIView):
         session_id = serializer.validated_data.get("session_id")
 
         # ------------------------------------------------------------------ #
-        # 2. Resolve the session (continue one, or start a new one)            #
+        # 2. Resolve the session (continue one, or start a new one)          #
         # ------------------------------------------------------------------ #
         existing = None
         if session_id is not None:
@@ -322,8 +340,20 @@ class ChatView(APIView):
                 )
 
         # ------------------------------------------------------------------ #
-        # 3. Save the question and the temporary answer together               #
+        # 3. Fail fast when the LLM is not configured: nothing is persisted  #
         # ------------------------------------------------------------------ #
+        try:
+            ensure_llm_configured()
+        except LLMConfigError as exc:
+            return Response(
+                {"detail": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # ------------------------------------------------------------------ #
+        # 4. Save the question (the first turn opens the session)            #
+        # ------------------------------------------------------------------ #
+        created_session = existing is None
         with transaction.atomic():
             session = existing or ChatSession.objects.create(
                 title=_session_title(question)
@@ -333,18 +363,47 @@ class ChatView(APIView):
                 role=ChatMessage.Role.USER,
                 content=question,
             )
-            assistant_message = ChatMessage.objects.create(
-                session=session,
-                role=ChatMessage.Role.ASSISTANT,
-                content=_temporary_reply(),
+
+        # ------------------------------------------------------------------ #
+        # 5. Ask the agent (it loads history + decides on tool use itself)    #
+        # ------------------------------------------------------------------ #
+        try:
+            result = ask_nexus(question, session_id=str(session.id))
+        except Exception as exc:
+            logger.exception("ask_nexus failed for session %s", session.id)
+            # Undo the half-turn so the next attempt starts from clean history.
+            with transaction.atomic():
+                if created_session:
+                    session.delete()  # cascades to the just-saved question
+                else:
+                    user_message.delete()
+            if isinstance(exc, LLMConfigError):
+                return Response(
+                    {"detail": str(exc)},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            return Response(
+                {"detail": f"The assistant failed to answer: {exc}"},
+                status=status.HTTP_502_BAD_GATEWAY,
             )
 
         # ------------------------------------------------------------------ #
-        # 4. Return the session id and both stored messages                    #
+        # 6. Save the assistant answer                                       #
+        # ------------------------------------------------------------------ #
+        assistant_message = ChatMessage.objects.create(
+            session=session,
+            role=ChatMessage.Role.ASSISTANT,
+            content=result.answer,
+        )
+
+        # ------------------------------------------------------------------ #
+        # 7. Return the session, both messages, the answer and its sources   #
         # ------------------------------------------------------------------ #
         payload = {
             "session_id": str(session.id),
             "session_title": session.title,
+            "answer": result.answer,
+            "sources": _sources_payload(result.sources),
             "messages": ChatMessageSerializer(
                 [user_message, assistant_message], many=True
             ).data,
@@ -360,16 +419,51 @@ def _session_title(question: str, limit: int = 80) -> str:
     return title[: limit - 1].rstrip() + "…"
 
 
-def _temporary_reply() -> str:
-    """Placeholder assistant answer used until the real pipeline exists.
+_EXCERPT_LIMIT = 400
 
-    Deliberately states that no retrieval or language model is involved, so
-    the response never pretends to have read the uploaded documents.
+
+def _sources_payload(sources: list[RetrievedChunk]) -> list[dict]:
+    """Shape the chunks the agent retrieved into the response ``sources``.
+
+    Every value is real RAG evidence: the stored document file name, the
+    chunk metadata (page, section, source file) and its similarity score.
+    Nothing is invented when the extractor could not detect a page/section.
     """
-    return (
-        "Thanks — your question has been saved to this conversation.\n\n"
-        "This is a temporary response: document processing, retrieval (RAG) "
-        "and the language model are not connected yet, so I cannot answer "
-        "from your documents in this step. Once they are wired in, this same "
-        "endpoint will return a grounded answer with citations."
-    )
+    if not sources:
+        return []
+
+    file_names = {
+        str(pk): name
+        for pk, name in Document.objects.filter(
+            pk__in=[s.document_id for s in sources]
+        ).values_list("pk", "file_name")
+    }
+
+    payload: list[dict] = []
+    for chunk in sources:
+        archive = chunk.metadata.get("source_archive")
+        if archive:
+            # A file extracted from a zip: cite the archive + inner path.
+            inner = chunk.metadata.get("source_file") or ""
+            document_name = f"{archive} / {inner}" if inner else str(archive)
+        else:
+            document_name = file_names.get(str(chunk.document_id)) or str(
+                chunk.metadata.get("source_file") or ""
+            )
+
+        excerpt = " ".join(chunk.text.split())
+        if len(excerpt) > _EXCERPT_LIMIT:
+            excerpt = excerpt[: _EXCERPT_LIMIT - 1].rstrip() + "…"
+
+        payload.append(
+            {
+                "document_id": chunk.document_id,
+                "document_type": chunk.document_type,
+                "document_name": document_name,
+                "page": chunk.page,
+                "section": chunk.section,
+                "score": round(float(chunk.score), 4),
+                "excerpt": excerpt,
+            }
+        )
+    return payload
