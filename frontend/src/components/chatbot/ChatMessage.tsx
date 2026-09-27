@@ -1,5 +1,6 @@
 import type { Message } from '../../types/chat';
 import SourceList from './SourceList';
+import Markdown from '../common/Markdown';
 import NexusLogo from '../common/NexusLogo';
 
 interface ChatMessageProps {
@@ -51,12 +52,9 @@ export default function ChatMessage({ message }: ChatMessageProps) {
           >
             Nexus
           </p>
-          <p
-            className="whitespace-pre-wrap text-sm leading-relaxed"
-            style={{ color: '#e8d5f5' }}
-          >
-            {message.content}
-          </p>
+          {/* Assistant answers are Markdown: headings, lists, tables and
+              code render properly instead of showing raw ### markers. */}
+          <Markdown text={message.content} className="text-sm" />
           <SourceList sources={message.sources} />
         </div>
         <p className="mt-1 pl-1 text-[10px]" style={{ color: 'rgba(192,132,252,0.35)' }}>

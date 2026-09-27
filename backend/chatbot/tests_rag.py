@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import uuid
+from unittest import mock
 
 import docx  # python-docx: builds a genuine .docx for the orchestration test
 from django.db import connection
@@ -280,6 +282,283 @@ class RAGServiceTests(TestCase):
             self.rag.retrieve("methodology", filters={"title": "nope"})
         with self.assertRaises(ValueError):
             self.rag.retrieve("methodology", top_k=0)
+
+    # ------------------------------------------------------------------ #
+    # retrieve(): similarity threshold (RAG_SIMILARITY_THRESHOLD)          #
+    # ------------------------------------------------------------------ #
+
+    def test_threshold_env_is_configurable(self) -> None:
+        # A floor above every score returns nothing; "off" disables the floor.
+        self.rag.index(self._sample_chunks())
+
+        with mock.patch.dict(os.environ, {"RAG_SIMILARITY_THRESHOLD": "0.99"}):
+            self.assertEqual(self.rag.retrieve("Chapter 3 methodology"), [])
+
+        with mock.patch.dict(os.environ, {"RAG_SIMILARITY_THRESHOLD": "off"}):
+            unfiltered = self.rag.retrieve("Chapter 3 methodology", top_k=5)
+        self.assertTrue(unfiltered)
+
+        # Unset -> the calibrated default keeps the best match and drops
+        # only the sub-floor tail (weak hash-noise rows).
+        with mock.patch.dict(os.environ, {}, clear=False) as env:
+            env.pop("RAG_SIMILARITY_THRESHOLD", None)
+            default = self.rag.retrieve("Chapter 3 methodology", top_k=5)
+        self.assertTrue(default)
+        self.assertEqual(default[0].chunk_id, unfiltered[0].chunk_id)
+        self.assertLessEqual(len(default), len(unfiltered))
+        self.assertTrue(all(h.score >= 0.03 for h in default))
+        self.assertTrue(any(h.score < 0.03 for h in unfiltered))
+
+    def test_min_score_parameter_overrides_the_environment(self) -> None:
+        self.rag.index(self._sample_chunks())
+
+        with mock.patch.dict(os.environ, {"RAG_SIMILARITY_THRESHOLD": "0.99"}):
+            # min_score=None explicitly disables the floor...
+            self.assertTrue(self.rag.retrieve("Chapter 3 methodology", min_score=None))
+        # ...and an explicit floor applies even without the env var.
+        self.assertEqual(
+            self.rag.retrieve("Chapter 3 methodology", min_score=0.99), []
+        )
+
+    def test_invalid_threshold_configuration_raises(self) -> None:
+        self.rag.index(self._sample_chunks())
+
+        for bad_env in ("abc", "5", "-2"):
+            with mock.patch.dict(os.environ, {"RAG_SIMILARITY_THRESHOLD": bad_env}):
+                with self.assertRaises(ValueError):
+                    self.rag.retrieve("methodology")
+        with self.assertRaises(ValueError):
+            self.rag.retrieve("methodology", min_score=5)
+
+    def test_returns_fewer_than_top_k_when_only_one_chunk_passes(self) -> None:
+        # top_k=5 but only the best chunk is above the floor -> 1 result,
+        # never padded to 5 with weak matches.
+        self.rag.index(self._sample_chunks())
+
+        all_hits = self.rag.retrieve(
+            "methodology sampling", top_k=5, min_score=None
+        )
+        self.assertGreaterEqual(len(all_hits), 2)
+        floor = (all_hits[0].score + all_hits[1].score) / 2
+
+        kept = self.rag.retrieve("methodology sampling", top_k=5, min_score=floor)
+
+        self.assertEqual(len(kept), 1)
+        self.assertLess(len(kept), 5)
+        self.assertEqual(kept[0].chunk_id, all_hits[0].chunk_id)
+        self.assertGreaterEqual(kept[0].score, floor)
+
+    # ------------------------------------------------------------------ #
+    # retrieve(): metadata gate (non-evidence records)                     #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _raw_chunk(document: Document, index: int, text: str,
+                   metadata: dict, *, session: ChatSession | None = None,
+                   ) -> ProcessedChunk:
+        """A ProcessedChunk with full control over its metadata (unlike
+        make_chunk, which pins file_type=pdf)."""
+        meta = dict(metadata)
+        meta.setdefault("source_file", document.file_name)
+        meta["char_count"] = len(text)
+        if session is not None:
+            meta["session_id"] = str(session.id)
+        return ProcessedChunk(
+            chunk_id=str(uuid.uuid4()),
+            document_id=str(document.id),
+            chunk_index=index,
+            text=text,
+            metadata=meta,
+        )
+
+    def test_bibliography_and_template_assets_are_suppressed(self) -> None:
+        # The user-reported failure: a structure question returned
+        # bibliography.bib, listings/A.java and example templates too.
+        content = make_chunk(
+            self.uni, 0,
+            "The dissertation structure has four chapters: introduction, "
+            "state of the art, contributions and implementation.",
+            page=12, heading="Structure", session=self.session,
+        )
+        bib = self._raw_chunk(
+            self.uni, 1,
+            "Bardeen, James and Hawking, Stephen (1973). The four laws of "
+            "black hole mechanics. Reviews of Modern Physics.",
+            {"source_file": "bibliography.bib", "file_type": "bib",
+             "citation_key": "bardeen73", "entry_type": "article"},
+            session=self.session,
+        )
+        java = self._raw_chunk(
+            self.uni, 2,
+            "public void op1() { System.out.println(matrix[0]); }",
+            {"source_file": "listings/A.java", "file_type": "java",
+             "content_type": "method", "class_name": "A"},
+            session=self.session,
+        )
+        table = self._raw_chunk(
+            self.uni, 3,
+            "Colonne 1 & Colonne 2 & Colonne 3 - dissertation structure "
+            "example table.",
+            {"source_file": "tables/example.tex", "file_type": "tex"},
+            session=self.session,
+        )
+        self.rag.index([content, bib, java, table])
+
+        hits = self.rag.retrieve(
+            "What structure does the dissertation require?", top_k=5
+        )
+
+        sources = {h.metadata.get("source_file") for h in hits}
+        self.assertIn("guidelines.pdf", sources)          # real content kept
+        self.assertNotIn("bibliography.bib", sources)     # junk removed
+        self.assertNotIn("listings/A.java", sources)
+        self.assertNotIn("tables/example.tex", sources)
+
+    def test_suppressed_records_return_for_queries_that_target_them(self) -> None:
+        # The gate is query-aware: a references question must still reach
+        # the bibliography (no global extension filtering).
+        bib = self._raw_chunk(
+            self.uni, 0,
+            "Bardeen, James and Hawking, Stephen (1973). The four laws of "
+            "black hole mechanics. References and citations of the "
+            "dissertation bibliography.",
+            {"source_file": "bibliography.bib", "file_type": "bib",
+             "citation_key": "bardeen73", "entry_type": "article"},
+            session=self.session,
+        )
+        self.rag.index([bib])
+
+        hits = self.rag.retrieve(
+            "Which references and citations are listed in the bibliography?",
+            top_k=5,
+        )
+        self.assertEqual(
+            [h.metadata.get("source_file") for h in hits], ["bibliography.bib"]
+        )
+
+    def test_algorithm_example_assets_are_suppressed(self) -> None:
+        # Live E2E leak: algorithms/example.tex reached a structure answer.
+        # The chunk text deliberately shares vocabulary with the query so
+        # the test exercises the metadata gate, not the score floor.
+        content = make_chunk(
+            self.uni, 0,
+            "The dissertation structure has four chapters: introduction, "
+            "state of the art, contributions and implementation.",
+            page=12, heading="Structure", session=self.session,
+        )
+        example = self._raw_chunk(
+            self.uni, 1,
+            "This example demonstrates the required dissertation structure "
+            "of the template using the algorithm environment.",
+            {"source_file": "algorithms/example.tex", "file_type": "tex"},
+            session=self.session,
+        )
+        self.rag.index([content, example])
+
+        hits = self.rag.retrieve(
+            "What structure does the dissertation require?", top_k=5
+        )
+        sources = {h.metadata.get("source_file") for h in hits}
+        self.assertIn("guidelines.pdf", sources)
+        self.assertNotIn("algorithms/example.tex", sources)
+
+        # A query that actually targets the algorithms keeps the example.
+        targeted = self.rag.retrieve(
+            "Show the algorithm example from the template", top_k=5
+        )
+        self.assertIn(
+            "algorithms/example.tex",
+            {h.metadata.get("source_file") for h in targeted},
+        )
+
+    def test_unextracted_image_placeholder_is_never_evidence(self) -> None:
+        placeholder = self._raw_chunk(
+            self.stu, 0,
+            "[Image 'fig3.png' - no OCR/Vision engine configured]",
+            {"source_file": "thesis.pdf", "file_type": "image",
+             "ocr_status": "not_configured"},
+            session=self.session,
+        )
+        extracted = self._raw_chunk(
+            self.stu, 1,
+            "Figure 3 shows the system architecture of the proposed method.",
+            {"source_file": "thesis.pdf", "file_type": "image",
+             "ocr_status": "extracted", "page": 14},
+            session=self.session,
+        )
+        self.rag.index([placeholder, extracted])
+
+        hits = self.rag.retrieve("system architecture figure", top_k=5)
+
+        self.assertTrue(hits)
+        for hit in hits:
+            self.assertNotIn("no OCR", hit.text)
+
+    def test_comparison_retrieval_includes_both_document_types(self) -> None:
+        self.rag.index(self._sample_chunks())
+
+        # Realistic comparison wording that shares vocabulary with both
+        # sides (measured: uni 0.124, student 0.149 — above the floor).
+        hits = self.rag.retrieve(
+            "Compare the methodology with my thesis",
+            top_k=5,
+        )
+
+        types = {hit.document_type for hit in hits}
+        self.assertEqual(types, {"university", "student"})
+
+    def test_source_metadata_is_preserved_through_retrieve(self) -> None:
+        # ZIP internal path + archive + file format survive the round trip.
+        chunk = self._raw_chunk(
+            self.uni, 0,
+            "Chapter 2 lists the contributions of the dissertation structure.",
+            {"source_file": "chapters/contributions.tex", "file_type": "tex",
+             "source_archive": "Atelier SCI.zip", "heading": "Contributions",
+             "page": 9},
+            session=self.session,
+        )
+        self.rag.index([chunk])
+
+        hits = self.rag.retrieve("contributions chapter", top_k=3)
+
+        self.assertEqual(len(hits), 1)
+        hit = hits[0]
+        self.assertEqual(hit.metadata["source_file"], "chapters/contributions.tex")
+        self.assertEqual(hit.metadata["source_archive"], "Atelier SCI.zip")
+        self.assertEqual(hit.metadata["file_type"], "tex")
+        self.assertEqual(hit.section, "Contributions")
+        self.assertEqual(hit.page, 9)
+
+    def test_identical_duplicate_chunks_are_deduplicated(self) -> None:
+        text = "The methodology follows a two-stage sampling plan."
+        first = self._raw_chunk(
+            self.uni, 0, text,
+            {"source_file": "guidelines.pdf", "file_type": "pdf"},
+            session=self.session,
+        )
+        second = self._raw_chunk(
+            self.uni, 1, text,  # same text, different chunk_id
+            {"source_file": "guidelines.pdf", "file_type": "pdf"},
+            session=self.session,
+        )
+        self.rag.index([first, second])
+        self.assertEqual(DocumentVector.objects.count(), 2)  # both stored
+
+        hits = self.rag.retrieve("two-stage sampling methodology", top_k=5)
+
+        self.assertEqual(len(hits), 1)
+        self.assertEqual(hits[0].chunk_id, first.chunk_id)
+
+    def test_different_chunks_of_the_same_document_are_kept(self) -> None:
+        # Dedup must not remove legitimate evidence just because two chunks
+        # come from the same document.
+        self.rag.index(self._sample_chunks())
+
+        hits = self.rag.retrieve("methodology thesis", top_k=5, min_score=None)
+
+        uni_hits = [h for h in hits if h.document_type == "university"]
+        self.assertGreaterEqual(len(uni_hits), 1)
+        self.assertEqual(len({h.chunk_id for h in hits}), len(hits))
 
     def test_delete_for_document_removes_only_that_documents_vectors(self) -> None:
         self.rag.index(self._sample_chunks())

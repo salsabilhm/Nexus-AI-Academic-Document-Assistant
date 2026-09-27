@@ -32,6 +32,8 @@ function toSources(apiSources: ApiSource[]): Source[] {
   return apiSources.map((source) => ({
     documentId: source.document_id,
     documentName: source.document_name,
+    documentType: source.document_type,
+    section: source.section ?? undefined,
     excerpt: source.excerpt,
     pageNumber: source.page ?? undefined,
   }));

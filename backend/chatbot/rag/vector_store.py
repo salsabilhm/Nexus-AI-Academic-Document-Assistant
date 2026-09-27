@@ -17,6 +17,9 @@ Implementation notes
   with psycopg 3.
 - Similarity is cosine: distance operator ``<=>``, ``score = 1 - distance``
   (1.0 = identical direction, 0.0 = unrelated, -1.0 = opposite).
+- ``search`` can enforce a minimum ``score`` in SQL (``min_score``), so a
+  query with few genuinely similar chunks returns fewer than ``top_k``
+  rows instead of padding the result with weak matches.
 - ``add()`` first deletes the previous vectors of every document it receives,
   so re-indexing a document replaces its vectors instead of duplicating them.
 - ``filters`` is a small allow-list mapped to real columns
@@ -159,14 +162,27 @@ class VectorStore:
         vector: Sequence[float],
         filters: dict[str, Any] | None = None,
         top_k: int = 5,
+        min_score: float | None = None,
     ) -> list[StoredChunk]:
         """Return the ``top_k`` most similar chunks, best score first.
 
+        ``min_score`` (when given) is applied *inside SQL*, on the same
+        ``score = 1 - distance`` expression used for ordering: rows below
+        the threshold never leave the database, and the result may
+        therefore contain **fewer than** ``top_k`` chunks — including zero.
+        Pass ``None`` (the default here) for "no threshold".
+
         Raises ValueError for ``top_k < 1``, a zero vector (nothing sensible
-        to compare against) or a filter outside ``FILTERABLE_FIELDS``.
+        to compare against), a ``min_score`` outside [-1, 1], or a filter
+        outside ``FILTERABLE_FIELDS``.
         """
         if top_k < 1:
             raise ValueError(f"top_k must be >= 1, got {top_k}")
+        if min_score is not None and not -1.0 <= float(min_score) <= 1.0:
+            raise ValueError(
+                f"min_score must be within [-1, 1] (cosine score range), "
+                f"got {min_score!r}"
+            )
         if not vector or not any(vector):
             raise ValueError(
                 "Cannot search with a zero vector (empty or stopword-only text)."
@@ -187,8 +203,16 @@ class VectorStore:
                 clauses.append(f"{column} = %s")
                 params.append(value)
 
-        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         literal = _vector_literal(vector)
+
+        # The threshold clause is appended *after* the filter clauses so the
+        # bound parameters keep their text order (filters first, then the
+        # literal + value of the score floor).
+        if min_score is not None:
+            clauses.append("(1 - (embedding <=> %s::vector)) >= %s")
+            params.extend([literal, float(min_score)])
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         sql = (
             "SELECT content, document_id, document_type, chunk_id, chunk_index, "
             "       page, section, session_id, metadata, "
@@ -198,7 +222,8 @@ class VectorStore:
             "LIMIT %s"
         )
         # Parameter order follows the text order of the placeholders:
-        # score expression, filters, ORDER BY expression, LIMIT.
+        # score expression, WHERE (filters + threshold), ORDER BY expression,
+        # LIMIT.
         query_params = [literal, *params, literal, top_k]
 
         hits: list[StoredChunk] = []

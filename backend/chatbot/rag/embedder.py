@@ -125,3 +125,20 @@ class Embedder:
     def embed_batch(self, texts: Iterable[str]) -> list[list[float]]:
         """Embed several texts (same output as calling ``embed`` one by one)."""
         return [self.embed(text) for text in texts]
+
+
+def content_terms(text: str) -> set[str]:
+    """Public helper: the content terms of ``text`` after normalization.
+
+    Same pipeline the embedder uses (NFKD accent folding, lowercase,
+    ``[a-z0-9]+`` tokenization, stopword removal) but returned as *real*
+    terms instead of hashed buckets — so callers can check true vocabulary
+    overlap without hash collisions. Single-character tokens are dropped:
+    they are contraction fragments ("what's" -> "s") that would otherwise
+    create fake matches between unrelated texts.
+    """
+    return {
+        token
+        for token in _TOKEN_RE.findall(_normalize(text))
+        if token not in _STOPWORDS and len(token) > 1
+    }

@@ -262,6 +262,32 @@ class PromptRulesTests(SimpleTestCase):
         self.assertIn('"student"', SYSTEM_PROMPT)
         self.assertIn('"both"', SYSTEM_PROMPT)
 
+    def test_prompt_defines_markdown_structure_and_answer_types(self) -> None:
+        # PART 5: clean Markdown, structure chosen per question type.
+        for fragment in (
+            "Answer structure (Markdown)",
+            "structure/requirements question",
+            "comparison question",
+            "simple factual question",
+            "multi-document question",
+            "Markdown table only when a comparison",
+        ):
+            self.assertIn(fragment, SYSTEM_PROMPT, fragment)
+
+    def test_prompt_defines_comparison_statuses_and_no_over_claiming(self) -> None:
+        # PART 9: Present / Missing / Unclear / Not verified + the rule that
+        # unseen is not absent (ToC example).
+        for fragment in (
+            "Comparison accuracy (never over-claim)",
+            "**Present**",
+            "**Missing**",
+            "**Unclear**",
+            "**Not verified**",
+            'Never mark something Missing just because it was not seen',
+            "The table of contents does not show these subsections",
+        ):
+            self.assertIn(fragment, SYSTEM_PROMPT, fragment)
+
 
 # ---------------------------------------------------------------------------
 # search_documents tool
@@ -357,6 +383,23 @@ class SearchToolTests(SimpleTestCase):
         self.assertEqual(message.artifact, [])
         self.assertIn("No relevant documents found", message.content)
         self.assertIn("do not guess", message.content)
+
+    def test_empty_results_state_the_evidence_is_insufficient(self) -> None:
+        # PART 2.1: no hits -> the agent is told the evidence is
+        # insufficient instead of being allowed to hallucinate.
+        self.rag.retrieve.return_value = []
+        message = make_search_documents().run(
+            {"query": "quantum banana", "source": "both"},
+            tool_call_id="call-4")
+        self.assertIn("insufficient evidence", message.content)
+
+    def test_citation_block_includes_the_file_format(self) -> None:
+        chunk = make_chunk(metadata={"source_file": "chapters/intro.tex",
+                                     "file_type": "tex"})
+        self.rag.retrieve.return_value = [chunk]
+        message = make_search_documents().run(
+            {"query": "q", "source": "university"}, tool_call_id="call-5")
+        self.assertIn("file_type: tex", message.content)
 
     def test_retrieve_never_receives_the_question_as_a_filter(self) -> None:
         # The query goes as the query argument only: questions are never

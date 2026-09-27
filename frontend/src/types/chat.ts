@@ -6,6 +6,10 @@ export type ChatRole = 'user' | 'assistant';
 export interface Source {
   documentId: string;
   documentName: string;
+  /** Which collection the passage came from: university vs student. */
+  documentType?: 'university' | 'student';
+  /** Detected section/chapter heading, when the extractor found one. */
+  section?: string;
   excerpt: string;
   pageNumber?: number;
 }

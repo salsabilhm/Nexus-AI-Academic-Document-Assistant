@@ -53,6 +53,11 @@ def _format_chunk(chunk: RetrievedChunk) -> str:
     source_file = chunk.metadata.get("source_file")
     if source_file:
         parts.append(f"source_file: {source_file}")
+    file_type = chunk.metadata.get("file_type")
+    if file_type:
+        # Original format (pdf/tex/bib/java/...): lets the model tell a PDF
+        # requirement page from a LaTeX template chapter when citing.
+        parts.append(f"file_type: {file_type}")
     parts.append(f"score: {chunk.score:.3f}")
     return f"[{' | '.join(parts)}]\n{chunk.text}"
 
@@ -102,6 +107,7 @@ def make_search_documents(session_id: str | None = None) -> BaseTool:
             where = f" in the '{source}' collection" if source != "both" else ""
             return (
                 f"No relevant documents found for query '{query}'{where}. "
+                "There is insufficient evidence to answer — say so explicitly. "
                 "Tell the user the available documents do not contain this "
                 "information — do not guess or fill the gap.",
                 [],
