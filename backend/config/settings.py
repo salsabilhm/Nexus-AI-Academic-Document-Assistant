@@ -39,8 +39,14 @@ if not SECRET_KEY:
         SECRET_KEY = "insecure-development-key-do-not-use-in-production"
     else:
         raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG is False.")
-
-# إعداد المضيفين المسموح بهم مع دعم تلقائي لـ Render
+# Hostnames Django is willing to answer for (Host-header validation, runs
+# before CORS). The defaults cover the local dev server; production adds the
+# backend's own public domain, e.g.
+#   ALLOWED_HOSTS=localhost,127.0.0.1,nexus-api.onrender.com
+# Hosts of every CORS_ALLOWED_ORIGINS entry are appended once that list is
+# resolved (see the CORS section), so a frontend that proxies /api to this
+# backend (Vercel rewrites forwarding the frontend Host header) never trips
+# Django's DisallowedHost check.
 ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
@@ -188,11 +194,47 @@ AUTH_PASSWORD_VALIDATORS = [
 
 
 # --- CORS -------------------------------------------------------------------
+<<<<<<< HEAD
+=======
+# Browser origins allowed to call this API. An origin that is not listed gets
+# no Access-Control-Allow-Origin header and the browser reports a "Network
+# Error" even though Django answered the request successfully.
+#
+# Defaults: the Vite dev server on its usual ports — Vite silently moves to
+# the next free port (5174, ...) when 5173 is taken, so both are listed —
+# plus the backend's own origin. Production must add the deployed frontend:
+#   CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app
+# (comma-separated; origins of this list are also accepted as Host headers —
+# see ALLOWED_HOSTS above.)
+>>>>>>> af5d368 (Fix frontend backend production connectivity)
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:5173,http://localhost:5174,"
-    "http://127.0.0.1:5173,http://127.0.0.1:5174",
+    "http://127.0.0.1:5173,http://127.0.0.1:5174,"
+    "http://localhost:8000,http://127.0.0.1:8000",
 )
+<<<<<<< HEAD
+=======
+
+# Local development answers ANY origin so an unexpected Vite port (5175, ...),
+# a LAN IP or a phone emulator never breaks with a confusing Network Error.
+# Production (DEBUG=False) stays strict: only CORS_ALLOWED_ORIGINS above.
+# Set CORS_ALLOW_ALL_ORIGINS=True/False explicitly to override either case.
+# (Safe here: the API sends no cookies/credentials, and every endpoint is
+# read-only and open — cors-headers simply adds Access-Control-Allow-*.)
+CORS_ALLOW_ALL_ORIGINS = _env_bool("CORS_ALLOW_ALL_ORIGINS", str(DEBUG))
+
+# Keep Host validation in sync with CORS: when a frontend proxies /api to
+# this backend (e.g. a Vercel rewrite), the browser's Host header reaches
+# Django as the FRONTEND's host and would be rejected as DisallowedHost
+# before CORS middleware ever runs. Accept every configured CORS origin host.
+for _origin in CORS_ALLOWED_ORIGINS:
+    _host = urlparse(_origin).netloc  # "https://a.vercel.app" -> "a.vercel.app"
+    if _host and _host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_host)
+
+# Future: allow credentials/extra headers explicitly if the API needs them.
+>>>>>>> af5d368 (Fix frontend backend production connectivity)
 
 
 # --- Django REST Framework --------------------------------------------------
