@@ -83,7 +83,7 @@ const API_BASE_URL = resolved.replace(/\/+$/, '');
 // when the body is a FormData instance.
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 120000,
 });
 
 // Normalizes any thrown error into a stable ApiError shape for the UI.
