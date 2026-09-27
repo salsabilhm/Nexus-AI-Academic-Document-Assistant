@@ -1,3 +1,4 @@
+```python
 """Django settings for the Nexus backend.
 
 Environment-driven configuration:
@@ -5,6 +6,7 @@ Environment-driven configuration:
 - placeholders for future LLM keys (LLM_API_KEY, ...)
 Real secrets live only in .env, which is ignored by Git.
 """
+
 import os
 from pathlib import Path
 from urllib.parse import urlparse, unquote
@@ -20,7 +22,12 @@ load_dotenv(BASE_DIR / ".env")
 
 def _env_bool(name: str, default: str = "False") -> bool:
     """Read a boolean environment variable."""
-    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+    return os.environ.get(name, default).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _env_list(name: str, default: str = "") -> list[str]:
@@ -30,31 +37,42 @@ def _env_list(name: str, default: str = "") -> list[str]:
 
 
 # --- Core -------------------------------------------------------------------
+
 DEBUG = _env_bool("DEBUG", "True")
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "")
+
 if not SECRET_KEY:
     if DEBUG:
         # Development-only fallback so the project runs without a .env file.
         SECRET_KEY = "insecure-development-key-do-not-use-in-production"
     else:
         raise ImproperlyConfigured("SECRET_KEY must be set when DEBUG is False.")
+
+
 # Hostnames Django is willing to answer for (Host-header validation, runs
-# before CORS). The defaults cover the local dev server; production adds the
-# backend's own public domain, e.g.
+# before CORS). The defaults cover the local dev server; production adds
+# the backend's own public domain.
+#
+# Example:
 #   ALLOWED_HOSTS=localhost,127.0.0.1,nexus-api.onrender.com
-# Hosts of every CORS_ALLOWED_ORIGINS entry are appended once that list is
-# resolved (see the CORS section), so a frontend that proxies /api to this
-# backend (Vercel rewrites forwarding the frontend Host header) never trips
-# Django's DisallowedHost check.
-ALLOWED_HOSTS = _env_list("ALLOWED_HOSTS", "localhost,127.0.0.1")
+#
+# Hosts of configured CORS_ALLOWED_ORIGINS are appended below so that a
+# frontend that proxies /api to this backend does not trigger DisallowedHost.
+
+ALLOWED_HOSTS = _env_list(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1",
+)
 
 RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
 
 # --- Database ---------------------------------------------------------------
+
 def _database_config(url: str) -> dict:
     """Translate DATABASE_URL into a Django DATABASES entry.
 
@@ -62,31 +80,40 @@ def _database_config(url: str) -> dict:
     SQLite is accepted locally when DATABASE_URL is unset or uses sqlite://.
 
     For Supabase's transaction-mode pooler (port 6543) we disable
-    server-side cursors and named prepared statements, which pgbouncer does
-    not support in transaction mode.
+    server-side cursors and named prepared statements, which pgbouncer
+    does not support in transaction mode.
     """
+
     if not url:
         if not DEBUG:
             raise ImproperlyConfigured(
                 "DATABASE_URL must be set when DEBUG is False."
             )
+
         return {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
         }
 
-    # --- scheme check (safe: scheme never contains special chars) -----------
+    # --- scheme check -------------------------------------------------------
     if "://" not in url:
-        raise ImproperlyConfigured("DATABASE_URL must include a scheme (e.g. postgresql://...)")
+        raise ImproperlyConfigured(
+            "DATABASE_URL must include a scheme (e.g. postgresql://...)"
+        )
+
     scheme, rest = url.split("://", 1)
 
     if scheme in ("postgres", "postgresql"):
         # Split on the LAST '@' so passwords containing '@' are handled safely.
         at_idx = rest.rfind("@")
+
         if at_idx == -1:
-            raise ImproperlyConfigured("DATABASE_URL is missing the '@' host separator.")
-        userinfo = rest[:at_idx]       # user:password (may contain special chars)
-        hostinfo = rest[at_idx + 1:]   # host:port/dbname  (no password here)
+            raise ImproperlyConfigured(
+                "DATABASE_URL is missing the '@' host separator."
+            )
+
+        userinfo = rest[:at_idx]
+        hostinfo = rest[at_idx + 1:]
 
         # Strip any stray leading/trailing bracket that can corrupt IPv4 parsing.
         hostinfo = hostinfo.strip("[]")
@@ -96,15 +123,18 @@ def _database_config(url: str) -> dict:
             user, pw_encoded = userinfo.split(":", 1)
         else:
             user, pw_encoded = userinfo, ""
-        password = unquote(pw_encoded)   # decode %5B → [ etc.
 
-        # Parse host, port, dbname from the safe (no-password) tail.
+        password = unquote(pw_encoded)
+
+        # Parse host, port, dbname from the safe tail.
         parsed_tail = urlparse(f"postgresql://{hostinfo}")
-        host   = parsed_tail.hostname or ""
-        port   = str(parsed_tail.port or "5432")
+
+        host = parsed_tail.hostname or ""
+        port = str(parsed_tail.port or "5432")
         dbname = parsed_tail.path.lstrip("/") or "postgres"
 
         is_pooler = port == "6543"
+
         config: dict = {
             "ENGINE": "django.db.backends.postgresql",
             "NAME": dbname,
@@ -117,27 +147,41 @@ def _database_config(url: str) -> dict:
                 "sslmode": "require",
             },
         }
+
         if is_pooler:
-            # pgbouncer transaction mode does not support named cursors/prepared stmts.
+            # pgbouncer transaction mode does not support named cursors/prepared statements.
             config["DISABLE_SERVER_SIDE_CURSORS"] = True
             config["OPTIONS"]["prepare_threshold"] = None  # type: ignore[index]
+
         return config
 
     if scheme == "sqlite":
         # urlparse is safe here — sqlite URLs never contain passwords.
         parsed_sqlite = urlparse(url)
+
         return {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": Path(parsed_sqlite.path) if parsed_sqlite.path else BASE_DIR / "db.sqlite3",
+            "NAME": (
+                Path(parsed_sqlite.path)
+                if parsed_sqlite.path
+                else BASE_DIR / "db.sqlite3"
+            ),
         }
 
-    raise ImproperlyConfigured(f"Unsupported DATABASE_URL scheme: {scheme!r}")
+    raise ImproperlyConfigured(
+        f"Unsupported DATABASE_URL scheme: {scheme!r}"
+    )
 
 
-DATABASES = {"default": _database_config(os.environ.get("DATABASE_URL", ""))}
+DATABASES = {
+    "default": _database_config(
+        os.environ.get("DATABASE_URL", "")
+    )
+}
 
 
 # --- Applications -----------------------------------------------------------
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -145,17 +189,22 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+
     # Third party
     "rest_framework",
     "corsheaders",
+
     # Local
     "chatbot.apps.ChatbotConfig",
 ]
 
+
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+
     # CORS must run early so preflight requests are answered before anything else.
     "corsheaders.middleware.CorsMiddleware",
+
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -164,7 +213,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
+
 ROOT_URLCONF = "config.urls"
+
 
 TEMPLATES = [
     {
@@ -181,63 +232,70 @@ TEMPLATES = [
     },
 ]
 
+
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
+
 # Password validation (Django defaults)
+
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"
+    },
+    {
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"
+    },
 ]
 
 
 # --- CORS -------------------------------------------------------------------
-<<<<<<< HEAD
-=======
-# Browser origins allowed to call this API. An origin that is not listed gets
-# no Access-Control-Allow-Origin header and the browser reports a "Network
-# Error" even though Django answered the request successfully.
+
+# Browser origins allowed to call this API.
 #
-# Defaults: the Vite dev server on its usual ports — Vite silently moves to
-# the next free port (5174, ...) when 5173 is taken, so both are listed —
-# plus the backend's own origin. Production must add the deployed frontend:
-#   CORS_ALLOWED_ORIGINS=https://<your-app>.vercel.app
-# (comma-separated; origins of this list are also accepted as Host headers —
-# see ALLOWED_HOSTS above.)
->>>>>>> af5d368 (Fix frontend backend production connectivity)
+# Production example:
+#   CORS_ALLOWED_ORIGINS=https://your-app.vercel.app
+#
+# Origins are comma-separated.
+
 CORS_ALLOWED_ORIGINS = _env_list(
     "CORS_ALLOWED_ORIGINS",
     "http://localhost:5173,http://localhost:5174,"
     "http://127.0.0.1:5173,http://127.0.0.1:5174,"
     "http://localhost:8000,http://127.0.0.1:8000",
 )
-<<<<<<< HEAD
-=======
 
-# Local development answers ANY origin so an unexpected Vite port (5175, ...),
-# a LAN IP or a phone emulator never breaks with a confusing Network Error.
-# Production (DEBUG=False) stays strict: only CORS_ALLOWED_ORIGINS above.
-# Set CORS_ALLOW_ALL_ORIGINS=True/False explicitly to override either case.
-# (Safe here: the API sends no cookies/credentials, and every endpoint is
-# read-only and open — cors-headers simply adds Access-Control-Allow-*.)
-CORS_ALLOW_ALL_ORIGINS = _env_bool("CORS_ALLOW_ALL_ORIGINS", str(DEBUG))
 
-# Keep Host validation in sync with CORS: when a frontend proxies /api to
-# this backend (e.g. a Vercel rewrite), the browser's Host header reaches
-# Django as the FRONTEND's host and would be rejected as DisallowedHost
-# before CORS middleware ever runs. Accept every configured CORS origin host.
+# Local development can answer any origin.
+# Production should remain strict unless explicitly overridden.
+
+CORS_ALLOW_ALL_ORIGINS = _env_bool(
+    "CORS_ALLOW_ALL_ORIGINS",
+    str(DEBUG),
+)
+
+
+# Keep Host validation in sync with CORS.
+#
+# If a frontend proxies /api to this backend, Django may receive the
+# frontend host in the Host header. Adding configured CORS hosts prevents
+# DisallowedHost errors in that situation.
+
 for _origin in CORS_ALLOWED_ORIGINS:
-    _host = urlparse(_origin).netloc  # "https://a.vercel.app" -> "a.vercel.app"
+    _host = urlparse(_origin).netloc
+
     if _host and _host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(_host)
 
-# Future: allow credentials/extra headers explicitly if the API needs them.
->>>>>>> af5d368 (Fix frontend backend production connectivity)
-
 
 # --- Django REST Framework --------------------------------------------------
+
 REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.AllowAny",
@@ -246,30 +304,66 @@ REST_FRAMEWORK = {
 
 
 # --- Internationalization / static -----------------------------------------
+
 LANGUAGE_CODE = "en-us"
+
 TIME_ZONE = "UTC"
+
 USE_I18N = True
 USE_TZ = True
 
+
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 
 # --- Supabase Storage -------------------------------------------------------
-SUPABASE_URL: str = os.environ.get("SUPABASE_URL", "")
-SUPABASE_SERVICE_ROLE_KEY: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-SUPABASE_STORAGE_BUCKET: str = os.environ.get("SUPABASE_STORAGE_BUCKET", "documents")
+
+SUPABASE_URL: str = os.environ.get(
+    "SUPABASE_URL",
+    "",
+)
+
+SUPABASE_SERVICE_ROLE_KEY: str = os.environ.get(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "",
+)
+
+SUPABASE_STORAGE_BUCKET: str = os.environ.get(
+    "SUPABASE_STORAGE_BUCKET",
+    "documents",
+)
+
 
 if not DEBUG:
     if not SUPABASE_URL:
-        raise ImproperlyConfigured("SUPABASE_URL must be set when DEBUG is False.")
+        raise ImproperlyConfigured(
+            "SUPABASE_URL must be set when DEBUG is False."
+        )
+
     if not SUPABASE_SERVICE_ROLE_KEY:
-        raise ImproperlyConfigured("SUPABASE_SERVICE_ROLE_KEY must be set when DEBUG is False.")
+        raise ImproperlyConfigured(
+            "SUPABASE_SERVICE_ROLE_KEY must be set when DEBUG is False."
+        )
 
 
 # --- Future AI services (placeholders) -------------------------------------
-LLM_API_KEY: str = os.environ.get("LLM_API_KEY", "")
-LLM_MODEL: str = os.environ.get("LLM_MODEL", "")
-EMBEDDING_API_KEY: str = os.environ.get("EMBEDDING_API_KEY", "")
+
+LLM_API_KEY: str = os.environ.get(
+    "LLM_API_KEY",
+    "",
+)
+
+LLM_MODEL: str = os.environ.get(
+    "LLM_MODEL",
+    "",
+)
+
+EMBEDDING_API_KEY: str = os.environ.get(
+    "EMBEDDING_API_KEY",
+    "",
+)
+```
